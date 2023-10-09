@@ -6,21 +6,33 @@
 
 -- | Partial orders
 module Data.PartialOrd (
+  -- * Comparisons in partial orders
   PartialOrdering(..),
-  FullyOrd(..),
   fromOrd,
   toMaybeOrd,
   fromMaybeOrd,
+  fromLeqGeq,
+  -- * Partial orderings
+  PartialOrd(..),
   comparable,
+  -- * Special partial orderings
+  FullyOrd(..),
+  Discrete(..),
+  -- * Maxima and minima
   Maxima(..),
   maxima,
   Minima(..),
   minima,
+  -- * Partial orders on lists
+  Infix(..),
+  Prefix(..),
+  Suffix(..),
+  Subseq(..),
   ) where
 
-import Prelude hiding ((<=), (>=))
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, isSubsequenceOf)
 import Data.Monoid ()
 import Data.Semigroup ()
 import Data.Set (Set)
@@ -28,33 +40,41 @@ import qualified Data.Set as S
 
 
 -- | A data type representing relationships between two objects in a
--- poset: they can be related ('Just'), or unrelated ('Nothing').
---
--- We provide several patterns to make it more natural to work with
+-- poset: they can be related (by EQ', LT' or GT'; like EQ, LT or GT),
+-- or unrelated (NT').
 data PartialOrdering = EQ' | LT' | GT' | NT'
   deriving (Eq, Show)
 
+-- | Convert an ordering into a partial ordering
 fromOrd :: Ordering -> PartialOrdering
 fromOrd EQ = EQ'
 fromOrd LT = LT'
 fromOrd GT = GT'
 
+-- | Convert a partial ordering to an ordering
 toMaybeOrd :: PartialOrdering -> Maybe Ordering
 toMaybeOrd EQ' = Just EQ
 toMaybeOrd LT' = Just LT
 toMaybeOrd GT' = Just GT
 toMaybeOrd NT' = Nothing
 
+-- | Convert an ordering into a partial ordering
 fromMaybeOrd :: Maybe Ordering -> PartialOrdering
 fromMaybeOrd (Just EQ) = EQ'
 fromMaybeOrd (Just LT) = LT'
 fromMaybeOrd (Just GT) = GT'
 fromMaybeOrd Nothing   = NT'
 
+-- | Convert from `leq` and `geq` to a partial ordering
+fromLeqGeq :: Bool -> Bool -> PartialOrdering
+fromLeqGeq True True = EQ'
+fromLeqGeq True False = LT'
+fromLeqGeq False True = GT'
+fromLeqGeq False False = NT'
 
--- | A helper type for constructing partial orderings (using deriving
--- via): if something is totally ordered, it has a partial ordering
--- where everything is 'Just'.
+
+-- | A helper type for constructing partial orderings from total
+-- orderings (using deriving via)
 newtype FullyOrd a = FullyOrd {
   getOrd :: a
 } deriving (Eq, Ord, Show)
@@ -62,15 +82,21 @@ newtype FullyOrd a = FullyOrd {
 instance (Ord a) => PartialOrd (FullyOrd a) where
   compare' (FullyOrd x) (FullyOrd y) = fromOrd $ compare x y
 
--- | This one comes up so frequently it's worth hardwiring
-deriving via FullyOrd Int instance PartialOrd Int
+
+-- | A helper type for constructing partial orderings where everything
+-- is equal or incomparable.
+newtype Discrete a = Discrete {
+  getDiscrete :: a
+} deriving (Eq, Show)
+
+instance (Eq a) => PartialOrd (Discrete a) where
+  compare' (Discrete x) (Discrete y)
+    | x == y    = EQ'
+    | otherwise = NT'
 
 
--- | A monoidal structure suitable for working with tuples.
---
--- It will turn out that (x1,y1) is less than or equal to (x2,y2) if
--- x1 is less than or equal to x2 and y1 is less than or equal to
--- y2. This monoidal structure combines information in this way.
+-- | A comparison (less than or equal, greater than or equal) holds if
+-- and only if it does on both arguments.
 instance Semigroup PartialOrdering where
   NT' <> _   = NT'
   EQ' <> x   = x
@@ -86,59 +112,65 @@ instance Monoid PartialOrdering where
 -- | A typeclass expressing partially ordered types: any two elements
 -- are related by a `PartialOrdering`.
 class PartialOrd a where
-  {-# MINIMAL compare' | (<=) #-}
+  {-# MINIMAL compare' | leq #-}
 
   compare' :: a -> a -> PartialOrdering
-  compare' a b = case a <= b of
-    True -> case a >= b of
-      True -> EQ'
-      False -> LT'
-    False -> case a >= b of
-      True -> GT'
-      False -> NT'
+  compare' a b = fromLeqGeq (a `leq` b) (a `geq` b)
 
-  (<=) :: a -> a -> Bool
-  a <= b = case compare' a b of
+  leq :: a -> a -> Bool
+  a `leq` b = case compare' a b of
     LT' -> True
     EQ' -> True
     _   -> False
 
-  (>=) :: a -> a -> Bool
-  a >= b = b <= a
+  geq :: a -> a -> Bool
+  a `geq` b = b `leq` a
 
-
+-- | Are they LT', EQ', GT'
 comparable :: PartialOrd a => a -> a -> Bool
 comparable a b = case compare' a b of
   NT' -> False
   _   -> True
 
+-- | It's hard to imagine another sensible instance
+deriving via FullyOrd Int instance PartialOrd Int
+
+-- | It's hard to imagine another sensible instance
+deriving via FullyOrd Integer instance PartialOrd Integer
+
 
 instance PartialOrd () where
   compare' _ _ = EQ'
 
+-- | This is equivalent to
+--
+--   >   compare' (a,b) (c,d) = compare' a c <> compare' b d
+--
+--   but may be more efficient: if compare' a1 a2 is LT' or GT' we seek less
+--   information about b1 and b2 (and this can be faster).
 instance (PartialOrd a, PartialOrd b) => PartialOrd (a,b) where
   compare' (a1,b1) (a2,b2) = case compare' a1 a2 of
     NT' -> NT'
     EQ' -> compare' b1 b2
-    LT' -> if b1 <= b2 then LT' else NT'
-    GT' -> if b1 >= b2 then GT' else NT'
-  (a1,b1) <= (a2,b2) = a1 <= a2 && b1 <= b2
+    LT' -> if b1 `leq` b2 then LT' else NT'
+    GT' -> if b1 `geq` b2 then GT' else NT'
+  (a1,b1) `leq` (a2,b2) = a1 `leq` a2 && b1 `leq` b2
 
 instance (PartialOrd a, PartialOrd b, PartialOrd c) => PartialOrd (a,b,c) where
   compare' (a1,b1,c1) (a2,b2,c2) = compare' ((a1,b1),c1) ((a2,b2),c2)
-  (a1,b1,c1) <= (a2,b2,c2) = a1 <= a2 && b1 <= b2 && c1 <= c2
+  (a1,b1,c1) `leq` (a2,b2,c2) = a1 `leq` a2 && b1 `leq` b2 && c1 `leq` c2
 
 instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d) => PartialOrd (a,b,c,d) where
   compare' (a1,b1,c1,d1) (a2,b2,c2,d2) = compare' (((a1,b1),c1),d1) (((a2,b2),c2),d2)
-  (a1,b1,c1,d1) <= (a2,b2,c2,d2) = a1 <= a2 && b1 <= b2 && c1 <= c2 && d1 <= d2
+  (a1,b1,c1,d1) `leq` (a2,b2,c2,d2) = a1 `leq` a2 && b1 `leq` b2 && c1 `leq` c2 && d1 `leq` d2
 
 instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e) => PartialOrd (a,b,c,d,e) where
   compare' (a1,b1,c1,d1,e1) (a2,b2,c2,d2,e2) = compare' ((((a1,b1),c1),d1),e1) ((((a2,b2),c2),d2),e2)
-  (a1,b1,c1,d1,e1) <= (a2,b2,c2,d2,e2) = a1 <= a2 && b1 <= b2 && c1 <= c2 && d1 <= d2 && e1 <= e2
+  (a1,b1,c1,d1,e1) `leq` (a2,b2,c2,d2,e2) = a1 `leq` a2 && b1 `leq` b2 && c1 `leq` c2 && d1 `leq` d2 && e1 `leq` e2
 
 
 instance Ord a => PartialOrd (Set a) where
-  (<=) = S.isSubsetOf
+  leq = S.isSubsetOf
 
   compare' u v = case compare (S.size u) (S.size v) of
     LT -> if S.isSubsetOf u v then LT' else NT'
@@ -146,7 +178,7 @@ instance Ord a => PartialOrd (Set a) where
     EQ -> if u == v then EQ' else NT'
 
 instance PartialOrd IntSet where
-  (<=) = IS.isSubsetOf
+  leq = IS.isSubsetOf
 
   compare' u v = case compare (IS.size u) (IS.size v) of
     LT -> if IS.isSubsetOf u v then LT' else NT'
@@ -154,14 +186,59 @@ instance PartialOrd IntSet where
     EQ -> if u == v then EQ' else NT'
 
 
+-- | Lists partially ordered by infix inclusion
+newtype Infix a = Infix {
+  unInfix :: [a]
+} deriving (Eq, Show)
+
+instance Eq a => PartialOrd (Infix a) where
+  Infix a `leq` Infix b = isInfixOf a b
+
+-- | Lists partially ordered by prefix inclusion
+newtype Prefix a = Prefix {
+  unPrefix :: [a]
+} deriving (Eq, Show)
+
+instance Eq a => PartialOrd (Prefix a) where
+  compare' (Prefix a) (Prefix b) = let
+    inner [] [] = EQ'
+    inner [] _ = LT'
+    inner _ [] = GT'
+    inner (x:xs) (y:ys)
+      | x == y    = inner xs ys
+      | otherwise = NT'
+    in inner a b
+  Prefix a `leq` Prefix b = isPrefixOf a b
+
+
+-- | Lists partially ordered by suffix inclusion
+newtype Suffix a = Suffix {
+  unSuffix :: [a]
+} deriving (Eq, Show)
+
+instance Eq a => PartialOrd (Suffix a) where
+  Suffix a `leq` Suffix b = isSuffixOf a b
+
+
+-- | Lists partially ordered by the subsequence relation
+newtype Subseq a = Subseq {
+  unSubseq :: [a]
+} deriving (Eq, Show)
+
+instance Eq a => PartialOrd (Subseq a) where
+  Subseq a `leq` Subseq b = isSubsequenceOf a b
+
+
 -- | Sets of incomparable elements, with a monoidal structure obtained
 -- by taking the maximal ones.
 --
 -- Unfortunately, we need a full ordering for these to work (since
--- they use sets), though we don't assume they extend the given
--- partial order, or anything like that.  The monoid structures are
+-- they use sets), though we don't assume this ordering has any
+-- compatibility with the partial order. The monoid structures are
 -- most efficient with pre-reduced sets as the left-hand argument.
-newtype Maxima a = Maxima { maxSet :: Set a }
+newtype Maxima a = Maxima {
+  maxSet :: Set a
+}
 
 instance (Ord a, PartialOrd a) => Semigroup (Maxima a) where
   Maxima s1 <> Maxima s2 = let
@@ -180,7 +257,9 @@ maxima = S.toList . maxSet . mconcat . fmap (Maxima . S.singleton)
 
 
 -- | As above, but with minima
-newtype Minima a = Minima { minSet :: Set a }
+newtype Minima a = Minima {
+  minSet :: Set a
+}
 
 instance (Ord a, PartialOrd a) => Semigroup (Minima a) where
   Minima s1 <> Minima s2 = let
@@ -196,4 +275,3 @@ instance (Ord a, PartialOrd a) => Monoid (Minima a) where
 -- | Find the minima of a list (passing it through the machinery above)
 minima :: (Ord a, PartialOrd a) => [a] -> [a]
 minima = S.toList . minSet . mconcat . fmap (Minima . S.singleton)
-

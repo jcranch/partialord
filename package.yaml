@@ -1,5 +1,5 @@
 name:                partialord
-version:             0.0.0
+version:             0.0.1
 github:              "jcranch/partialord"
 license:             BSD-3-Clause
 author:              "James Cranch"
@@ -17,7 +17,7 @@ description:         Please see README.md
 
 dependencies:
 - base       >= 4.7 && < 5
-- containers >= 0.6 && < 0.7
+- containers >= 0.6 && < 0.8
 
 ghc-options:
 - -Wall
@@ -29,8 +29,6 @@ ghc-options:
 - -Wmissing-home-modules
 - -Wpartial-fields
 - -Wredundant-constraints
-- -Werror
-- -O2
 
 library:
   source-dirs: src
