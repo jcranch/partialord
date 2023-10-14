@@ -5,7 +5,7 @@ cabal-version: 2.2
 -- see: https://github.com/sol/hpack
 
 name:           partialord
-version:        0.0.1
+version:        0.0.2
 synopsis:       Data structure supporting partial orders
 description:    Please see README.md
 category:       Data structures

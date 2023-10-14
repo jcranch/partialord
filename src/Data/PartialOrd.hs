@@ -12,6 +12,7 @@ module Data.PartialOrd (
   toMaybeOrd,
   fromMaybeOrd,
   fromLeqGeq,
+  fromCompare,
   -- * Partial orderings
   PartialOrd(..),
   comparable,
@@ -50,6 +51,10 @@ fromOrd :: Ordering -> PartialOrdering
 fromOrd EQ = EQ'
 fromOrd LT = LT'
 fromOrd GT = GT'
+
+-- | Lift a `compare` to a `compare'`
+fromCompare :: Ord a => a -> a -> PartialOrdering
+fromCompare x y = fromOrd $ compare x y
 
 -- | Convert a partial ordering to an ordering
 toMaybeOrd :: PartialOrdering -> Maybe Ordering
