@@ -151,8 +151,8 @@ instance PartialOrd () where
 --
 --   >   compare' (a,b) (c,d) = compare' a c <> compare' b d
 --
---   but may be more efficient: if compare' a1 a2 is LT' or GT' we seek less
---   information about b1 and b2 (and this can be faster).
+--   but may be more efficient: if compare' a c is LT' or GT' we need less
+--   information about b and d.
 instance (PartialOrd a, PartialOrd b) => PartialOrd (a,b) where
   compare' (a1,b1) (a2,b2) = case compare' a1 a2 of
     NT' -> NT'
