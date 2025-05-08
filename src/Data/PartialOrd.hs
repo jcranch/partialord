@@ -42,10 +42,14 @@ module Data.PartialOrd (
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 import Data.List (isInfixOf, isPrefixOf, isSuffixOf, isSubsequenceOf)
+import qualified Data.Map.Strict as M
+import Data.Map.Internal (Map(..))
 import Data.Monoid ()
+import Data.Ord (Down(..))
 import Data.Semigroup ()
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Void (Void, absurd)
 
 
 -- | A data type representing relationships between two objects in a
@@ -210,8 +214,8 @@ instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e) 
 
 
 -- | All elements on the left are less than all those on the right
-newtype Join = Join {
-  getJoin (Either a b)
+newtype Join a b = Join {
+  getJoin :: Either a b
 }
 
 instance (PartialOrd a, PartialOrd b) => PartialOrd (Join a b) where
@@ -221,15 +225,15 @@ instance (PartialOrd a, PartialOrd b) => PartialOrd (Join a b) where
   compare' (Join (Right x)) (Join (Right y)) = compare' x y
 
 -- | All elements on the left are incomparable with all those on the right
-newtype Disjoint = Disjoint {
-  getDisjoint (Either a b)
+newtype Disjoint a b = Disjoint {
+  getDisjoint :: Either a b
 }
 
 instance (PartialOrd a, PartialOrd b) => PartialOrd (Disjoint a b) where
-  compare' (Join (Left _)) (Join (Right _)) = NT'
-  compare' (Join (Right _)) (Join (Left _)) = NT'
-  compare' (Join (Left x)) (Join (Left y)) = compare' x y
-  compare' (Join (Right x)) (Join (Right y)) = compare' x y
+  compare' (Disjoint (Left _)) (Disjoint (Right _)) = NT'
+  compare' (Disjoint (Right _)) (Disjoint (Left _)) = NT'
+  compare' (Disjoint (Left x)) (Disjoint (Left y)) = compare' x y
+  compare' (Disjoint (Right x)) (Disjoint (Right y)) = compare' x y
 
 
 -- | Sets, with the subset partial order
@@ -340,7 +344,7 @@ instance (Ord a, PartialOrd a) => Monoid (Minima a) where
 
 -- | Find the minima of a list (passing it through the machinery above)
 minima :: (Foldable f, Ord a, PartialOrd a) => f a -> Set a
-minima = minSet . mconcat . fmap (Minima . S.singleton)
+minima = minSet . foldMap (Minima . S.singleton)
 
 
 -- | Maps partially ordered for pointwise comparison, where empty
@@ -352,29 +356,31 @@ newtype PointwisePositive k v = PointwisePositive {
   getPointwisePositive :: Map k v
 }
 
-instance PartialOrd v => PartialOrd (PointwisePositive k v) where
+instance (Ord k, PartialOrd v) => PartialOrd (PointwisePositive k v) where
 
   -- We reimplement the merge because of the possibility of early exit
   -- (in the case where mv2 is Nothing).
-  leq' = let
-    go Tip _ = True
-    go (Bin _ k1 v1 l1 r1) m2 = case splitLookup k1 m2 of
+  leq = let
+    inner Tip _ = True
+    inner (Bin _ k1 v1 l1 r1) m2 = case M.splitLookup k1 m2 of
       (l2, mv2, r2) -> case mv2 of
         Nothing -> False
-        Just v2 -> go l1 l2 && leq' v1 v2 && go r1 r2
-    in go
+        Just v2 -> inner l1 l2 && leq v1 v2 && inner r1 r2
+    start (PointwisePositive m1) (PointwisePositive m2) = inner m1 m2
+    in start
 
   -- We reimplement the merge because of the possibility for
   -- shortcutting (via the call to compare')
   compare' = let
-    go Tip Tip = EQ'
-    go Tip (Bin _ _ _ _ _) = LT'
-    go (Bin _ k1 v1 l1 r1) m2 = case splitLookup k1 m2 of
+    inner Tip Tip = EQ'
+    inner Tip (Bin _ _ _ _ _) = LT'
+    inner (Bin _ k1 v1 l1 r1) m2 = case M.splitLookup k1 m2 of
       (l2, mv2, r2) -> case mv2 of
-        Nothing -> if geq' l1 l2 && geq' r1 r2 then GT' else NT'
-        Just v2 -> compare' (l1,v1,r1) (l2,v2,r2)
-    in go
+        Nothing -> if geq (PointwisePositive l1) (PointwisePositive l2) && geq (PointwisePositive r1) (PointwisePositive r2) then GT' else NT'
+        Just v2 -> compare' (PointwisePositive l1,v1,PointwisePositive r1) (PointwisePositive l2,v2,PointwisePositive r2)
+    start (PointwisePositive m1) (PointwisePositive m2) = inner m1 m2
+    in start
 
 
 instance PartialOrd a => PartialOrd (Down a) where
-  compare' x y = compare y x
+  compare' (Down x) (Down y) = compare' y x
