@@ -13,6 +13,9 @@ module Data.PartialOrd (
   fromMaybeOrd,
   fromLeqGeq,
   fromCompare,
+  isLeq,
+  isGeq,
+  reversePartial,
   -- * Partial orderings
   PartialOrd(..),
   comparable,
@@ -29,6 +32,11 @@ module Data.PartialOrd (
   Prefix(..),
   Suffix(..),
   Subseq(..),
+  -- * Partial orders on Either
+  Join(..),
+  Disjoint(..),
+  -- * Partial orders on Map
+  PointwisePositive(..),
   ) where
 
 import Data.IntSet (IntSet)
@@ -77,6 +85,44 @@ fromLeqGeq True False = LT'
 fromLeqGeq False True = GT'
 fromLeqGeq False False = NT'
 
+isLeq :: PartialOrdering -> Bool
+isLeq EQ' = True
+isLeq LT' = True
+isLeq _ = False
+
+isGeq :: PartialOrdering -> Bool
+isGeq EQ' = True
+isGeq GT' = True
+isGeq _ = False
+
+reversePartial :: PartialOrdering -> PartialOrdering
+reversePartial EQ' = EQ'
+reversePartial LT' = GT'
+reversePartial GT' = LT'
+reversePartial NT' = NT'
+
+
+-- | A typeclass expressing partially ordered types: any two elements
+-- are related by a `PartialOrdering`.
+--
+-- In some cases `leq` can be quicker to run than `compare`. The
+-- provided implementations such as `PartialOrd (a,b)` take advantage
+-- of this.
+class PartialOrd a where
+  {-# MINIMAL compare' | leq #-}
+
+  compare' :: a -> a -> PartialOrdering
+  compare' a b = fromLeqGeq (a `leq` b) (a `geq` b)
+
+  leq :: a -> a -> Bool
+  a `leq` b = case compare' a b of
+    LT' -> True
+    EQ' -> True
+    _   -> False
+
+  geq :: a -> a -> Bool
+  a `geq` b = b `leq` a
+
 
 -- | A helper type for constructing partial orderings from total
 -- orderings (using deriving via)
@@ -114,22 +160,6 @@ instance Semigroup PartialOrdering where
 instance Monoid PartialOrdering where
   mempty = EQ'
 
--- | A typeclass expressing partially ordered types: any two elements
--- are related by a `PartialOrdering`.
-class PartialOrd a where
-  {-# MINIMAL compare' | leq #-}
-
-  compare' :: a -> a -> PartialOrdering
-  compare' a b = fromLeqGeq (a `leq` b) (a `geq` b)
-
-  leq :: a -> a -> Bool
-  a `leq` b = case compare' a b of
-    LT' -> True
-    EQ' -> True
-    _   -> False
-
-  geq :: a -> a -> Bool
-  a `geq` b = b `leq` a
 
 -- | Are they LT', EQ', GT'
 comparable :: PartialOrd a => a -> a -> Bool
@@ -146,6 +176,10 @@ deriving via FullyOrd Integer instance PartialOrd Integer
 
 instance PartialOrd () where
   compare' _ _ = EQ'
+
+instance PartialOrd Void where
+  compare' = absurd
+
 
 -- | This is equivalent to
 --
@@ -174,6 +208,31 @@ instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e) 
   (a1,b1,c1,d1,e1) `leq` (a2,b2,c2,d2,e2) = a1 `leq` a2 && b1 `leq` b2 && c1 `leq` c2 && d1 `leq` d2 && e1 `leq` e2
 
 
+
+-- | All elements on the left are less than all those on the right
+newtype Join = Join {
+  getJoin (Either a b)
+}
+
+instance (PartialOrd a, PartialOrd b) => PartialOrd (Join a b) where
+  compare' (Join (Left _)) (Join (Right _)) = LT'
+  compare' (Join (Right _)) (Join (Left _)) = GT'
+  compare' (Join (Left x)) (Join (Left y)) = compare' x y
+  compare' (Join (Right x)) (Join (Right y)) = compare' x y
+
+-- | All elements on the left are incomparable with all those on the right
+newtype Disjoint = Disjoint {
+  getDisjoint (Either a b)
+}
+
+instance (PartialOrd a, PartialOrd b) => PartialOrd (Disjoint a b) where
+  compare' (Join (Left _)) (Join (Right _)) = NT'
+  compare' (Join (Right _)) (Join (Left _)) = NT'
+  compare' (Join (Left x)) (Join (Left y)) = compare' x y
+  compare' (Join (Right x)) (Join (Right y)) = compare' x y
+
+
+-- | Sets, with the subset partial order
 instance Ord a => PartialOrd (Set a) where
   leq = S.isSubsetOf
 
@@ -182,6 +241,7 @@ instance Ord a => PartialOrd (Set a) where
     GT -> if S.isSubsetOf v u then GT' else NT'
     EQ -> if u == v then EQ' else NT'
 
+-- | Sets of integers, with the subset partial order
 instance PartialOrd IntSet where
   leq = IS.isSubsetOf
 
@@ -198,6 +258,7 @@ newtype Infix a = Infix {
 
 instance Eq a => PartialOrd (Infix a) where
   Infix a `leq` Infix b = isInfixOf a b
+
 
 -- | Lists partially ordered by prefix inclusion
 newtype Prefix a = Prefix {
@@ -257,8 +318,8 @@ instance (Ord a, PartialOrd a) => Monoid (Maxima a) where
   mappend = (<>)
 
 -- | Find the maxima of a list (passing it through the machinery above)
-maxima :: (Ord a, PartialOrd a) => [a] -> [a]
-maxima = S.toList . maxSet . mconcat . fmap (Maxima . S.singleton)
+maxima :: (Foldable f, Ord a, PartialOrd a) => f a -> Set a
+maxima = maxSet . foldMap (Maxima . S.singleton)
 
 
 -- | As above, but with minima
@@ -278,5 +339,42 @@ instance (Ord a, PartialOrd a) => Monoid (Minima a) where
   mappend = (<>)
 
 -- | Find the minima of a list (passing it through the machinery above)
-minima :: (Ord a, PartialOrd a) => [a] -> [a]
-minima = S.toList . minSet . mconcat . fmap (Minima . S.singleton)
+minima :: (Foldable f, Ord a, PartialOrd a) => f a -> Set a
+minima = minSet . mconcat . fmap (Minima . S.singleton)
+
+
+-- | Maps partially ordered for pointwise comparison, where empty
+-- values are considered minimal.
+--
+-- This is commonplace, but by no means the only conceivably ordering
+-- on Map.
+newtype PointwisePositive k v = PointwisePositive {
+  getPointwisePositive :: Map k v
+}
+
+instance PartialOrd v => PartialOrd (PointwisePositive k v) where
+
+  -- We reimplement the merge because of the possibility of early exit
+  -- (in the case where mv2 is Nothing).
+  leq' = let
+    go Tip _ = True
+    go (Bin _ k1 v1 l1 r1) m2 = case splitLookup k1 m2 of
+      (l2, mv2, r2) -> case mv2 of
+        Nothing -> False
+        Just v2 -> go l1 l2 && leq' v1 v2 && go r1 r2
+    in go
+
+  -- We reimplement the merge because of the possibility for
+  -- shortcutting (via the call to compare')
+  compare' = let
+    go Tip Tip = EQ'
+    go Tip (Bin _ _ _ _ _) = LT'
+    go (Bin _ k1 v1 l1 r1) m2 = case splitLookup k1 m2 of
+      (l2, mv2, r2) -> case mv2 of
+        Nothing -> if geq' l1 l2 && geq' r1 r2 then GT' else NT'
+        Just v2 -> compare' (l1,v1,r1) (l2,v2,r2)
+    in go
+
+
+instance PartialOrd a => PartialOrd (Down a) where
+  compare' x y = compare y x
