@@ -1,10 +1,10 @@
 name:                partialord
-version:             0.1.0
+version:             0.1.1
 github:              "jcranch/partialord"
 license:             BSD-3-Clause
 author:              "James Cranch"
 maintainer:          "j.d.cranch@sheffield.ac.uk"
-copyright:           "2023 James Cranch"
+copyright:           "2023-25 James Cranch"
 
 extra-source-files:
 - README.md

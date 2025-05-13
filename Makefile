@@ -1,5 +1,5 @@
 build:
-	stack build
+	stack test
 
 documents: README.html
 
